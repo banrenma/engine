@@ -23,7 +23,7 @@
  THE SOFTWARE.
 */
 
-import { ccclass, help, executionOrder, menu, displayOrder, visible, multiline, type, serializable, editable } from 'cc.decorator';
+import { ccclass, help, executionOrder, menu, displayOrder, visible, multiline, type, serializable, editable, rangeMin } from 'cc.decorator';
 import { BYTEDANCE, EDITOR, JSB } from 'internal:constants';
 import { minigame } from 'pal/minigame';
 import { BitmapFont, Font, SpriteFrame } from '../assets';
@@ -131,6 +131,15 @@ export enum Overflow {
      * @zh 在 RESIZE_HEIGHT 模式下，只能更改文本的宽度，高度是自动改变的。
      */
     RESIZE_HEIGHT = 3,
+    /**
+     * @en In ELLIPSIS mode, when label content goes out of the bounding box, the excess part will be truncated
+     * and replaced by an ellipsis ("..."). If wrapping is enabled, the text is truncated at the last visible line,
+     * otherwise every line which is wider than the bounding box is truncated.
+     *
+     * @zh ELLIPSIS 模式中，当文本内容超出边界框时，多余的部分会被截断并以省略号（"..."）代替。
+     * 开启自动换行时，在最后一个可见行末尾截断；未开启自动换行时，每个超出宽度的行都会被截断。
+     */
+    ELLIPSIS = 4,
 }
 
 ccenum(Overflow);
@@ -392,6 +401,78 @@ export class Label extends UIRenderer {
 
         this._enableWrapText = value;
         this._markForUpdateRenderData();
+    }
+
+    /**
+     * @en
+     * The minimum font size in SHRINK mode. The font will not be shrunk below this size,
+     * and the text which still goes out of the bounding box will be truncated with the ellipsis text.
+     * 0 means no limitation (the text will never be truncated by SHRINK mode).
+     *
+     * @zh
+     * SHRINK 模式下允许缩小到的最小字体大小。字体不会缩小到小于该值，
+     * 缩小到最小字体后仍然超出边界框的内容会被截断并以省略文本代替。
+     * 0 表示不限制（SHRINK 模式不会截断文本）。
+     */
+    @displayOrder(11.1)
+    @visible(function isShrinkOverflow (this: Label) { return this._overflow === Overflow.SHRINK; })
+    @rangeMin(0)
+    get minFontSize (): number {
+        return this._minFontSize;
+    }
+    set minFontSize (value) {
+        if (this._minFontSize === value) {
+            return;
+        }
+
+        this._minFontSize = value;
+        this._markForUpdateRenderData();
+    }
+
+    /**
+     * @en
+     * The text which is appended to the end of the truncated line. It is `undefined` by default,
+     * which means "..." is used. It is not exposed in the editor, set it manually in scripts if needed.
+     * Takes effect in ELLIPSIS mode, and in SHRINK mode when minFontSize is greater than 0.
+     *
+     * @zh
+     * 文本被截断时追加在行末尾的省略文本。默认为 `undefined`，表示使用 "..."。
+     * 不会在编辑器中显示，有需要时请在脚本中手动设置。
+     * 在 ELLIPSIS 模式下生效，以及在 SHRINK 模式下 minFontSize 大于 0 时生效。
+     */
+    get ellipsisText (): string | undefined {
+        return this._ellipsisText;
+    }
+    set ellipsisText (value: string | undefined) {
+        if (value === null) {
+            value = undefined;
+        }
+        if (this._ellipsisText === value) {
+            return;
+        }
+
+        this._ellipsisText = value;
+        this._markForUpdateRenderData();
+    }
+
+    /**
+     * @en
+     * Whether the content is truncated and the ellipsis text is displayed. Read only.
+     * It is only possible to be `true` in ELLIPSIS mode, or in SHRINK mode when minFontSize is greater than 0.
+     * The render data will be updated first if it is dirty.
+     *
+     * @zh
+     * 文本内容是否被截断并显示了省略文本，只读。
+     * 仅在 ELLIPSIS 模式，或 minFontSize 大于 0 的 SHRINK 模式下才可能为 `true`。
+     * 如果渲染数据已过期，会先更新渲染数据。
+     */
+    get isEllipsized (): boolean {
+        if (this.enabledInHierarchy && this.renderData && this.renderData.vertDirty) {
+            // Use force update to make sure the assembler and the font texture (canvas) are ready,
+            // otherwise the assembler may access the uninitialized assembler data.
+            this.updateRenderData(true);
+        }
+        return !!this._textLayoutData!.isEllipsized;
     }
 
     /**
@@ -808,6 +889,10 @@ export class Label extends UIRenderer {
     protected _overflow: Overflow = Overflow.NONE;
     @serializable
     protected _enableWrapText = true;
+    @serializable
+    protected _minFontSize = 0;
+    // don't need serialize, not exposed in the editor, `undefined` means using the default ellipsis text
+    protected _ellipsisText: string | undefined = undefined;
     @serializable
     protected _font: Font | null = null;
     @serializable

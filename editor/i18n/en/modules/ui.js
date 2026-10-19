@@ -53,7 +53,13 @@ module.exports = {
                         tooltip: 'Text layout modes: <br> ' +
                             '1. CLAMP: Text nodes outside the bounding box will be truncated. <br> ' +
                             '2. SHRINK: Automatically shrink text box according to the constraint node. <br> ' +
-                            '3. RESIZE: Automatically updates the Node based on height of the text.',
+                            '3. RESIZE: Automatically updates the Node based on height of the text. <br> ' +
+                            '4. ELLIPSIS: Text outside the bounding box will be truncated and the ellipsis text is shown at the end.',
+                    },
+                    'minFontSize': {
+                        displayName: 'Min Font Size',
+                        tooltip: 'The minimum font size in SHRINK mode. Text which still goes out of the bounding box at this size '
+                            + 'is truncated with the ellipsis text. 0 means no limitation.',
                     },
                     'enableWrapText': {
                         displayName: 'Auto Newline',
@@ -180,6 +186,11 @@ module.exports = {
                     'maxWidth': {
                         displayName: 'Max Width',
                         tooltip: 'The maximize width of RichText, pass 0 means not limit the maximize width.',
+                    },
+                    'maxLines': {
+                        displayName: 'Max Lines',
+                        tooltip: 'The maximum number of lines of RichText, 0 means no limitation. '
+                            + 'The content out of the max lines is truncated and the ellipsis text is shown at the end of the last visible line.',
                     },
                     'lineHeight': {
                         displayName: 'Line Height',

@@ -23,7 +23,9 @@
  THE SOFTWARE.
 */
 
-import { ccclass, requireComponent, executeInEditMode, executionOrder, help, menu, multiline, type, displayOrder, serializable, editable } from 'cc.decorator';
+import {
+    ccclass, requireComponent, executeInEditMode, executionOrder, help, menu, multiline, type, displayOrder, serializable, editable, rangeMin,
+} from 'cc.decorator';
 import { DEBUG, DEV, EDITOR } from 'internal:constants';
 import { Font, SpriteAtlas, TTFFont, SpriteFrame } from '../assets';
 import { EventTouch } from '../../input/types';
@@ -32,6 +34,7 @@ import { HtmlTextParser, IHtmlTextParserResultObj, IHtmlTextParserStack } from '
 import { Node } from '../../scene-graph';
 import { CacheMode, HorizontalTextAlignment, Label, VerticalTextAlignment } from './label';
 import { Sprite } from './sprite';
+import { DEFAULT_ELLIPSIS_TEXT } from '../assembler/label/text-layout';
 import { UITransform } from '../framework';
 import { Component } from '../../scene-graph/component';
 import { NodeEventType } from '../../scene-graph/node-event';
@@ -43,6 +46,7 @@ import {
     getEnglishWordPartAtFirst,
     getEnglishWordPartAtLast,
     getSymbolAt,
+    getSymbolLength,
 } from '../utils/text-utils';
 
 const _htmlTextParser = new HtmlTextParser();
@@ -381,6 +385,69 @@ export class RichText extends Component {
 
     /**
      * @en
+     * The maximum number of lines of the RichText, 0 means no limitation.
+     * The content which goes out of the max lines will be truncated and the ellipsis text is appended to the end of the last visible line.
+     *
+     * @zh
+     * 富文本的最大行数，0 表示不限制。
+     * 超出最大行数的内容会被截断，并在最后一个可见行的末尾追加省略文本。
+     */
+    @editable
+    @rangeMin(0)
+    get maxLines (): number {
+        return this._maxLines;
+    }
+
+    set maxLines (value) {
+        if (this._maxLines === value) {
+            return;
+        }
+
+        this._maxLines = value;
+        this._layoutDirty = true;
+        this._updateRichTextStatus();
+    }
+
+    /**
+     * @en
+     * The text which is appended to the end of the truncated line when the content goes out of maxLines.
+     * It is `undefined` by default, which means "..." is used.
+     * It is not exposed in the editor, set it manually in scripts if needed.
+     *
+     * @zh
+     * 内容超出 maxLines 被截断时，追加在末尾的省略文本。默认为 `undefined`，表示使用 "..."。
+     * 不会在编辑器中显示，有需要时请在脚本中手动设置。
+     */
+    get ellipsisText (): string | undefined {
+        return this._ellipsisText;
+    }
+
+    set ellipsisText (value: string | undefined) {
+        if (value === null) {
+            value = undefined;
+        }
+        if (this._ellipsisText === value) {
+            return;
+        }
+
+        this._ellipsisText = value;
+        this._layoutDirty = true;
+        this._updateRichTextStatus();
+    }
+
+    /**
+     * @en
+     * Whether the content is truncated by maxLines and the ellipsis text is displayed. Read only.
+     *
+     * @zh
+     * 内容是否因超出 maxLines 被截断并显示了省略文本，只读。
+     */
+    get isEllipsized (): boolean {
+        return this._isEllipsized;
+    }
+
+    /**
+     * @en
      * Line Height of RichText.
      *
      * @zh
@@ -479,6 +546,10 @@ export class RichText extends Component {
     @serializable
     protected _maxWidth = 0;
     @serializable
+    protected _maxLines = 0;
+    // don't need serialize, not exposed in the editor, `undefined` means using the default ellipsis text
+    protected _ellipsisText: string | undefined = undefined;
+    @serializable
     protected _fontFamily = 'Arial';
     @serializable
     protected _font: TTFFont | null = null;
@@ -502,6 +573,7 @@ export class RichText extends Component {
     protected _labelHeight = 0;
     protected _layoutDirty = true;
     protected _lineOffsetX = 0;
+    protected _isEllipsized = false;
     protected declare _updateRichTextStatus: () => void;
     protected _labelChildrenNum = 0; // only ISegment
 
@@ -826,6 +898,7 @@ export class RichText extends Component {
         this._lineCount = 1;
         this._labelWidth = 0;
         this._labelHeight = 0;
+        this._isEllipsized = false;
         this._layoutDirty = true;
     }
 
@@ -1145,6 +1218,8 @@ this._measureText(styleIndex) as unknown as (s: string) => number,
             this._linesWidth.push(this._lineOffsetX);
         }
 
+        this._applyEllipsis();
+
         if (this._maxWidth > 0) {
             this._labelWidth = this._maxWidth;
         }
@@ -1155,6 +1230,126 @@ this._measureText(styleIndex) as unknown as (s: string) => number,
 
         this._updateRichTextPosition();
         this._layoutDirty = false;
+    }
+
+    /**
+     * Truncate the segments which are out of `maxLines`, and append the ellipsis text to the last visible line.
+     */
+    protected _applyEllipsis (): void {
+        const maxLines = Math.floor(this._maxLines);
+        const segments = this._segments;
+        if (maxLines <= 0 || segments.length === 0 || segments[segments.length - 1].lineCount <= maxLines) {
+            return;
+        }
+
+        this._isEllipsized = true;
+
+        // remove the segments which are out of the max lines
+        while (segments.length > 0 && segments[segments.length - 1].lineCount > maxLines) {
+            this._recycleSegment(segments.pop()!);
+        }
+
+        // the ellipsis is appended to the last visible segment, even if it is not on the last line (e.g. followed by blank lines)
+        const targetLine = segments.length > 0 ? segments[segments.length - 1].lineCount : maxLines;
+        // the style of ellipsis follows the last visible text segment
+        let styleIndex = 0;
+        for (let i = segments.length - 1; i >= 0; --i) {
+            if (segments[i].type === RichTextChildName) {
+                styleIndex = segments[i].styleIndex;
+                break;
+            }
+        }
+
+        const ellipsisText = this._ellipsisText ?? DEFAULT_ELLIPSIS_TEXT;
+        const ellipsisWidth = ellipsisText ? this._calculateSize(_tempSize, styleIndex, ellipsisText).x : 0;
+        const maxWidth = this._maxWidth;
+
+        let lineWidth = 0;
+        for (let i = 0; i < segments.length; ++i) {
+            if (segments[i].lineCount === targetLine) {
+                lineWidth += segments[i].node._getUITransformComp()!.width;
+            }
+        }
+
+        // make room for the ellipsis at the end of the line
+        while (segments.length > 0) {
+            const seg = segments[segments.length - 1];
+            if (seg.lineCount !== targetLine) break;
+            const segWidth = seg.node._getUITransformComp()!.width;
+            if (seg.type === RichTextChildName) {
+                const label = seg.comp as Label;
+                const restWidth = lineWidth - segWidth;
+                const available = maxWidth > 0 ? maxWidth - restWidth - ellipsisWidth : Infinity;
+                const fitted = this._fitText(seg.styleIndex, label.string.replace(/\s+$/, ''), available);
+                if (fitted !== '') {
+                    if (fitted !== label.string) {
+                        label.string = fitted;
+                        label.updateRenderData(true);
+                    }
+                    lineWidth = restWidth + seg.node._getUITransformComp()!.width;
+                    break;
+                }
+            } else if (maxWidth <= 0 || lineWidth + ellipsisWidth <= maxWidth) {
+                // the image fits
+                break;
+            }
+            this._recycleSegment(segments.pop()!);
+            lineWidth -= segWidth;
+        }
+
+        this._lineCount = targetLine;
+        if (ellipsisText) {
+            this._addLabelSegment(ellipsisText, styleIndex);
+            lineWidth += ellipsisWidth;
+        }
+
+        const linesWidth = this._linesWidth;
+        linesWidth.length = Math.min(linesWidth.length, targetLine - 1);
+        while (linesWidth.length < targetLine - 1) {
+            linesWidth.push(0);
+        }
+        linesWidth.push(lineWidth);
+
+        if (maxWidth <= 0) {
+            this._labelWidth = Math.max(...linesWidth);
+        }
+    }
+
+    protected _recycleSegment (seg: ISegment): void {
+        seg.node.parent = null;
+        if (seg.type === RichTextChildName) {
+            labelPool.put(seg);
+        } else {
+            imagePool.put(seg);
+        }
+        this._labelChildrenNum--;
+    }
+
+    /**
+     * Get the longest prefix of `text` whose width is not larger than `maxWidth`.
+     */
+    protected _fitText (styleIndex: number, text: string, maxWidth: number): string {
+        if (maxWidth === Infinity) return text;
+        if (maxWidth <= 0 || text === '') return '';
+
+        const measure = (s: string): number => this._calculateSize(_tempSize, styleIndex, s).x;
+        if (measure(text) <= maxWidth) return text;
+
+        const symbols: string[] = [];
+        for (let i = 0, l = getSymbolLength(text); i < l; ++i) {
+            symbols.push(getSymbolAt(text, i));
+        }
+        let left = 0;
+        let right = symbols.length;
+        while (left < right) {
+            const mid = (left + right + 1) >> 1;
+            if (measure(symbols.slice(0, mid).join('')) <= maxWidth) {
+                left = mid;
+            } else {
+                right = mid - 1;
+            }
+        }
+        return symbols.slice(0, left).join('').replace(/\s+$/, '');
     }
 
     protected _getFirstWordLen (text: string, startIndex: number, textLen: number): number {

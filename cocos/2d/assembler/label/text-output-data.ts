@@ -32,6 +32,9 @@ export class TextOutputLayoutData {
     // string after process
     public parsedString: string[] = [];
 
+    // whether the content is truncated by the ellipsis
+    public isEllipsized = false; // both
+
     // node part
     public nodeContentSize = Size.ZERO.clone(); // both
 
@@ -45,6 +48,7 @@ export class TextOutputLayoutData {
 
     public reset (): void {
         this.parsedString.length = 0;
+        this.isEllipsized = false;
         this.nodeContentSize.set(0, 0);
         this.canvasSize.set();
         this.canvasPadding.set();

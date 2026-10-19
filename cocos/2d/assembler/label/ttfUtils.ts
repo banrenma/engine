@@ -28,6 +28,7 @@ import { dynamicAtlasManager } from '../../utils/dynamic-atlas/atlas-manager';
 import { TextProcessing } from './text-processing';
 import type { TextOutputLayoutData, TextOutputRenderData } from './text-output-data';
 import type { TextStyle } from './text-style';
+import { DEFAULT_ELLIPSIS_TEXT } from './text-layout';
 import type { TextLayout } from './text-layout';
 import { view } from '../../../ui/view';
 import { approx } from '../../../core';
@@ -53,6 +54,8 @@ export class TTFUtils {
         // layout info
         layout.lineHeight = comp.lineHeight; // both
         layout.overFlow = comp.overflow; // layout only // but change render
+        layout.minFontSize = comp.minFontSize;
+        layout.ellipsisText = comp.ellipsisText ?? DEFAULT_ELLIPSIS_TEXT;
         if (comp.overflow === Overflow.NONE) {
             layout.wrapping = false;
         } else if (comp.overflow === Overflow.RESIZE_HEIGHT) {

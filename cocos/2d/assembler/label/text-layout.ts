@@ -24,6 +24,8 @@
 
 import { Size } from '../../../core';
 
+export const DEFAULT_ELLIPSIS_TEXT = '...';
+
 export class TextLayout {
     // Layout common
     // alignment
@@ -34,6 +36,10 @@ export class TextLayout {
     public overFlow = 0;// Enum  // both
 
     public lineHeight = 10; // both
+
+    // ellipsis
+    public minFontSize = 0; // both, SHRINK mode only, 0 means no limitation
+    public ellipsisText = DEFAULT_ELLIPSIS_TEXT; // both, text appended to the truncated line
 
     // bmfont extra part
     public maxLineWidth = 0; // bmfont
@@ -62,6 +68,8 @@ export class TextLayout {
         this.wrapping = true;
         this.overFlow = 0;
         this.lineHeight = 10;
+        this.minFontSize = 0;
+        this.ellipsisText = DEFAULT_ELLIPSIS_TEXT;
         this.maxLineWidth = 0;
         this.spacingX = 0;
         this.textWidthTemp = 0;

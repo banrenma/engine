@@ -50,10 +50,15 @@ module.exports = {
                     },
                     'overflow': {
                         displayName: '溢出处理',
-                        tooltip: '文字排版模式，包括以下三种：<br> ' +
+                        tooltip: '文字排版模式，包括以下几种：<br> ' +
                             '1. CLAMP: 节点约束框之外的文字会被截断。 <br> ' +
                             '2. SHRINK: 自动根据节点约束框缩小文字。<br> ' +
-                            '3. RESIZE: 根据文本内容自动更新节点的 height 属性。',
+                            '3. RESIZE: 根据文本内容自动更新节点的 height 属性。<br> ' +
+                            '4. ELLIPSIS: 节点约束框之外的文字会被截断，并在末尾显示省略文本。',
+                    },
+                    'minFontSize': {
+                        displayName: '最小字体大小',
+                        tooltip: 'SHRINK 模式下允许缩小到的最小字体大小。缩小到该大小后仍然超出的文字会被截断并显示省略文本，0 表示不限制。',
                     },
                     'enableWrapText': {
                         displayName: '自动换行',
@@ -173,6 +178,10 @@ module.exports = {
                     'maxWidth': {
                         displayName: '最大宽度',
                         tooltip: '富文本的最大宽度, 传 0 的话意味着必须手动换行。',
+                    },
+                    'maxLines': {
+                        displayName: '最大行数',
+                        tooltip: '富文本的最大行数，0 表示不限制。超出的内容会被截断，并在最后一个可见行末尾显示省略文本。',
                     },
                     'lineHeight': {
                         displayName: '行高',

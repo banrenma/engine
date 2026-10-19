@@ -33,7 +33,7 @@ import { dynamicAtlasManager } from '../../utils/dynamic-atlas/atlas-manager';
 import { TextProcessing } from './text-processing';
 import { TextOutputLayoutData, TextOutputRenderData } from './text-output-data';
 import { TextStyle } from './text-style';
-import { TextLayout } from './text-layout';
+import { TextLayout, DEFAULT_ELLIPSIS_TEXT } from './text-layout';
 import { view } from '../../../ui/view';
 
 const _defaultLetterAtlas = new LetterAtlas(64, 64);
@@ -64,6 +64,8 @@ export class BmfontUtils {
         const overflow = comp.overflow;
         layout.overFlow = overflow;
         layout.lineHeight = comp.lineHeight;
+        layout.minFontSize = comp.minFontSize;
+        layout.ellipsisText = comp.ellipsisText ?? DEFAULT_ELLIPSIS_TEXT;
 
         const nodeContentSize = outputLayoutData.nodeContentSize;
         nodeContentSize.width = trans.width;

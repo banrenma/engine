@@ -130,8 +130,23 @@ export class TextProcessing {
             shareLabelInfo.fontScale = this._fontScale;
             this._setupBMFontOverflowMetrics(layout, outputLayoutData);
             this._updateFontScale(style);
+            this._bmfontString = inputString;
+            outputLayoutData.isEllipsized = false;
             this._computeHorizontalKerningForText(style, layout, inputString);
             this._alignText(style, layout, outputLayoutData, inputString);
+            // SHRINK mode with a minimum font size falls back to ellipsis when the font can not be shrunk any more
+            if (layout.overFlow === Overflow.ELLIPSIS as number
+                || (layout.overFlow === Overflow.SHRINK as number && layout.minFontSize > 0)) {
+                const ellipsisString = this._getBMFontEllipsisString(style, layout, outputLayoutData, inputString);
+                if (ellipsisString !== inputString) {
+                    // layout again with the truncated string, keep the font size unchanged
+                    this._bmfontString = ellipsisString;
+                    outputLayoutData.isEllipsized = true;
+                    this._computeHorizontalKerningForText(style, layout, ellipsisString);
+                    this._multilineTextWrap(style, layout, outputLayoutData, ellipsisString, this._getFirstWordLen);
+                    this._parsedString(outputLayoutData, ellipsisString);
+                }
+            }
         }
         if (out) {
             out = outputLayoutData.parsedString;
@@ -153,7 +168,8 @@ export class TextProcessing {
             this.generateVertexData(isBmFont, style, layout, outputLayoutData, outputRenderData, inputString, callback);
         } else {
             this._computeAlignmentOffset(style, layout, outputLayoutData);
-            this.generateVertexData(isBmFont, style, layout, outputLayoutData, outputRenderData, inputString, callback);
+            // the string may have been truncated by the ellipsis overflow mode
+            this.generateVertexData(isBmFont, style, layout, outputLayoutData, outputRenderData, this._bmfontString, callback);
         }
     }
 
@@ -171,6 +187,7 @@ export class TextProcessing {
     private _canvasData: ISharedLabelData | null = null;
 
     private _lettersInfo: LetterInfo[] = [];
+    private _bmfontString = '';
     private _tmpRect = new Rect();
 
     private _maxFontSize = 100;
@@ -192,6 +209,7 @@ export class TextProcessing {
         outputLayoutData: TextOutputLayoutData,
         inputString: string,
     ): void {
+        outputLayoutData.isEllipsized = false;
         if (!this._context) {
             return;
         }
@@ -234,12 +252,23 @@ export class TextProcessing {
             this._calculateWrapText(paragraphedStrings, style, layout, outputLayoutData);
             canvasSize.width  = nodeContentSize.width * fontScale;
             canvasSize.height = nodeContentSize.height * fontScale;
+            if (layout.minFontSize > 0) {
+                // the font can not be shrunk any more, truncate the content which is still out of the bounds
+                this._calculateEllipsisText(style, layout, outputLayoutData);
+            }
             break;
         }
         case Overflow.CLAMP: {
             this._calculateWrapText(paragraphedStrings, style, layout, outputLayoutData);
             canvasSize.width  = nodeContentSize.width * fontScale;
             canvasSize.height = nodeContentSize.height * fontScale;
+            break;
+        }
+        case Overflow.ELLIPSIS: {
+            this._calculateWrapText(paragraphedStrings, style, layout, outputLayoutData);
+            canvasSize.width  = nodeContentSize.width * fontScale;
+            canvasSize.height = nodeContentSize.height * fontScale;
+            this._calculateEllipsisText(style, layout, outputLayoutData);
             break;
         }
         case Overflow.RESIZE_HEIGHT: {
@@ -368,6 +397,16 @@ export class TextProcessing {
             this._context.font = _fontDesc;
         }
 
+        // limit the minimum font size
+        if (layout.minFontSize > 0) {
+            const minActualFontSize = Math.min(layout.minFontSize, style.fontSize) * this._fontScale;
+            if (_fontSize < minActualFontSize) {
+                _fontSize = minActualFontSize;
+                _fontDesc = this._getFontDesc(_fontSize, style.fontFamily, style.isBold, style.isItalic);
+                this._context.font = _fontDesc;
+            }
+        }
+
         style.actualFontSize = _fontSize;
         style.fontDesc = _fontDesc;
     }
@@ -391,6 +430,73 @@ export class TextProcessing {
         }
         outputLayoutData.parsedString = _splitStrings;
         style.fontDesc = _fontDesc;
+    }
+
+    /**
+     * Truncate the (already wrapped) lines so that they fit the node size, and append an ellipsis to the truncated lines.
+     */
+    private _calculateEllipsisText (style: TextStyle, layout: TextLayout, outputLayoutData: TextOutputLayoutData): void {
+        const context = this._context;
+        if (!context) return;
+
+        const { nodeContentSize, canvasSize } = outputLayoutData;
+        const maxWidth = nodeContentSize.width * this._fontScale;
+        if (maxWidth <= 0) return;
+
+        const measure = this._measureText(context, style.fontDesc);
+        const lineHeight = this._getLineHeight(layout.lineHeight, style.actualFontSize, style.fontSize);
+        const maxLines = this._getEllipsisMaxLines(canvasSize.height, lineHeight);
+
+        const lines = outputLayoutData.parsedString;
+        const truncated = lines.length > maxLines;
+        const lineCount = truncated ? maxLines : lines.length;
+        const result: string[] = [];
+        let changed = truncated;
+        for (let i = 0; i < lineCount; ++i) {
+            const line = lines[i];
+            // the last visible line must show the ellipsis if there are hidden lines behind it
+            const forceEllipsis = truncated && i === lineCount - 1;
+            if (!forceEllipsis && measure(line) <= maxWidth) {
+                result.push(line);
+            } else {
+                changed = true;
+                result.push(this._searchEllipsisString(line, layout.ellipsisText, (candidate): boolean => measure(candidate) <= maxWidth));
+            }
+        }
+        outputLayoutData.parsedString = result;
+        outputLayoutData.isEllipsized = changed;
+    }
+
+    private _getEllipsisMaxLines (height: number, lineHeight: number): number {
+        if (height <= 0 || lineHeight <= 0) {
+            return Infinity;
+        }
+        // at least one line is always displayed
+        return Math.max(1, Math.floor(height / lineHeight + 1e-3));
+    }
+
+    /**
+     * Find the longest prefix of `text` which makes `prefix + ellipsis` satisfy `fits`.
+     * The ellipsis is always appended to the result.
+     */
+    private _searchEllipsisString (text: string, ellipsis: string, fits: (candidate: string) => boolean): string {
+        const symbols: string[] = [];
+        for (let i = 0, l = getSymbolLength(text); i < l; ++i) {
+            symbols.push(getSymbolAt(text, i));
+        }
+        const compose = (count: number): string => `${symbols.slice(0, count).join('').replace(/\s+$/, '')}${ellipsis}`;
+
+        let left = 0;
+        let right = symbols.length;
+        while (left < right) {
+            const mid = (left + right + 1) >> 1;
+            if (fits(compose(mid))) {
+                left = mid;
+            } else {
+                right = mid - 1;
+            }
+        }
+        return compose(left);
     }
 
     private _measureText (ctx: CanvasRenderingContext2D, fontDesc: string): (str: string) => number {
@@ -779,6 +885,60 @@ export class TextProcessing {
         this._parsedString(outputLayoutData, inputString);
     }
 
+    /**
+     * Calculate the string to display when the text goes out of the node bounds in ELLIPSIS mode
+     * (or in SHRINK mode when the font reaches the minimum size).
+     * Returns `inputString` itself if nothing needs to be truncated.
+     * The layout data of `layout` must be calculated from `inputString` before calling this function.
+     */
+    private _getBMFontEllipsisString (
+        style: TextStyle,
+        layout: TextLayout,
+        outputLayoutData: TextOutputLayoutData,
+        inputString: string,
+    ): string {
+        const maxWidth = layout.maxLineWidth;
+        if (maxWidth <= 0) return inputString;
+
+        // line height is scaled in SHRINK mode
+        const lineHeight = layout.lineHeight * this._getFontScale(style, layout);
+        const maxLines = this._getEllipsisMaxLines(layout.textHeightTemp, lineHeight);
+        const ellipsis = layout.ellipsisText;
+        const probe = (str: string): void => {
+            this._computeHorizontalKerningForText(style, layout, str);
+            this._multilineTextWrap(style, layout, outputLayoutData, str, this._getFirstWordLen);
+        };
+
+        if (layout.wrapping) {
+            if (layout.numberOfLines <= maxLines) return inputString;
+            return this._searchEllipsisString(inputString, ellipsis, (candidate): boolean => {
+                probe(candidate);
+                return layout.numberOfLines <= maxLines;
+            });
+        }
+
+        // no wrapping: every paragraph is a single line
+        const lines = inputString.split('\n');
+        const linesWidth = layout.linesWidth.slice();
+        const truncated = lines.length > maxLines;
+        const lineCount = truncated ? maxLines : lines.length;
+        let changed = truncated;
+        const result: string[] = [];
+        for (let i = 0; i < lineCount; ++i) {
+            const forceEllipsis = truncated && i === lineCount - 1;
+            if (!forceEllipsis && !(linesWidth[i] > maxWidth)) {
+                result.push(lines[i]);
+                continue;
+            }
+            changed = true;
+            result.push(this._searchEllipsisString(lines[i], ellipsis, (candidate): boolean => {
+                probe(candidate);
+                return layout.linesWidth[0] <= maxWidth;
+            }));
+        }
+        return changed ? result.join('\n') : inputString;
+    }
+
     private _parsedString (outputLayoutData: TextOutputLayoutData, inputString: string): void {
         let _splitStrings: string[] = [];
         let textFragment = '';
@@ -1160,6 +1320,11 @@ export class TextProcessing {
             } else {
                 left = mid;
             }
+        }
+
+        // limit the minimum font size
+        if (layout.minFontSize > 0) {
+            left = Math.max(left, Math.min(layout.minFontSize, style.fontSize));
         }
 
         if (left >= 0) {
