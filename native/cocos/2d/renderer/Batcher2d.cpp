@@ -266,9 +266,14 @@ void Batcher2d::walk(Node* node, float parentOpacity, bool parentColorDirty) { /
     if (!breakWalk) {
         const auto& children = node->getChildren();
         float thisOpacity = (entity && entity->isEnabled()) ? entity->getOpacity() : finalOpacity;
-        for (const auto& child : children) {
-            // we should find parent opacity recursively upwards if it doesn't have an entity.
-            walk(child, thisOpacity, isCurrentColorDirty);
+        const auto layersNum = node->_getMultiLayersNum();
+        if (layersNum > 0) {
+            walkMultipleLayers(node, thisOpacity, isCurrentColorDirty, layersNum);
+        } else {
+            for (const auto& child : children) {
+                // we should find parent opacity recursively upwards if it doesn't have an entity.
+                walk(child, thisOpacity, isCurrentColorDirty);
+            }
         }
     }
     
@@ -290,6 +295,73 @@ void Batcher2d::walk(Node* node, float parentOpacity, bool parentColorDirty) { /
     }
 }
 
+/**
+ * Render the items (direct children) of `parent` layer by layer, so that the same kind of renderers
+ * in different items can be batched together. Keep the same logic as which in batcher-2d.ts:
+ * layer 0 is the item itself, layer `k` is the `k`-th child of every item, the last layer also takes the remaining children.
+ * `parent` itself must have been handled by `walk`.
+ */
+void Batcher2d::walkMultipleLayers(Node* parent, float parentOpacity, bool parentColorDirty, uint8_t layersNum) { // NOLINT(misc-no-recursion)
+    const auto& items = parent->getChildren();
+
+    // Layer 0: the items themselves
+    for (const auto& item : items) {
+        if (!item->isActiveInHierarchy()) {
+            continue;
+        }
+        auto* entity = static_cast<RenderEntity*>(item->getUserData());
+        // Mask needs enter/exit pairing, render the whole item depth-first, it is skipped in the other layers
+        if (entity && entity->getIsMask()) {
+            walk(item, parentOpacity, parentColorDirty);
+            continue;
+        }
+
+        const bool isCurrentColorDirty = item->_isColorDirty() || parentColorDirty;
+        const float finalOpacity = parentOpacity * item->_getLocalOpacity() * (entity ? entity->getColorAlpha() : 1.F);
+        item->_setFinalOpacity(finalOpacity);
+
+        if (entity && entity->isEnabled() && math::isNotEqualF(finalOpacity, 0)) {
+            if (isCurrentColorDirty) {
+                entity->setOpacity(finalOpacity);
+                entity->setVBColorDirty(true);
+            }
+            if (ENABLE_SORTING_2D && sorting2DCount > 0) {
+                recordUIRenderer(entity);
+            } else {
+                handleUIRenderer(entity);
+            }
+        }
+    }
+
+    // Layer 1 ~ layersNum: the children of the items
+    for (uint32_t layer = 1; layer <= layersNum; ++layer) {
+        const bool isLastLayer = layer == layersNum;
+        for (const auto& item : items) {
+            auto* entity = static_cast<RenderEntity*>(item->getUserData());
+            if (!item->isActiveInHierarchy() || (entity && entity->getIsMask())) {
+                continue;
+            }
+
+            // The final opacity of the item has been stored in layer 0
+            const float finalOpacity = item->_getFinalOpacity();
+            const bool isCurrentColorDirty = item->_isColorDirty() || parentColorDirty;
+            const auto& children = item->getChildren();
+            const bool breakWalk = entity && (!math::isNotEqualF(finalOpacity, 0) || entity->getRenderEntityType() == RenderEntityType::CROSSED);
+            if (!breakWalk && layer <= children.size()) {
+                const float thisOpacity = (entity && entity->isEnabled()) ? entity->getOpacity() : finalOpacity;
+                const size_t end = isLastLayer ? children.size() : layer;
+                for (size_t c = layer - 1; c < end; ++c) {
+                    walk(children[c], thisOpacity, isCurrentColorDirty);
+                }
+            }
+
+            // The item is not a mask, so there is nothing else to do in the post assembler
+            if (isLastLayer && isCurrentColorDirty) {
+                item->_setColorDirty(false);
+            }
+        }
+    }
+}
 void Batcher2d::handlePostRender(RenderEntity* entity) {
     bool isMask = entity->getIsMask();
     if (isMask) {

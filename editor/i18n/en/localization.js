@@ -336,6 +336,9 @@ module.exports = link(mixin({
     UIOpacity: {
         opacity: 'The value between 0 to 255 showing the transparency of the object',
     },
+    UIMultiLayers: {
+        layersNum: 'The number of layers. The direct children of this node are rendered layer by layer: layer 0 is the item itself, layer k is the k-th child of every item, and the last layer also takes the remaining children. Only use it when the items do not overlap each other',
+    },
     billboard: {
         texture: 'Billboard texture',
         height: 'Billboard height',

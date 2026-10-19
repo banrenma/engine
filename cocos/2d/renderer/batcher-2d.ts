@@ -903,6 +903,89 @@ export class Batcher2D implements IBatcher {
         queue.length = 0;
     }
 
+    /**
+     * Render the items (direct children) of `parent` layer by layer, so that the same kind of renderers
+     * in different items can be batched together:
+     * layer 0 is the item itself, layer `k` is the `k`-th child of every item, the last layer also takes the remaining children.
+     * `parent` itself must have been handled by `walk`.
+     */
+    private _walkMultipleLayers (parent: Node, layersNum: number): void {
+        const items = parent.children;
+        const parentOpacity = this._pOpacity;
+        const parentOpacityDirty = this._opacityDirty;
+
+        // Layer 0: the items themselves
+        for (let i = 0; i < items.length; ++i) {
+            const item = items[i];
+            if (!item.activeInHierarchy) {
+                continue;
+            }
+            const uiProps = item._uiProps;
+            const render = uiProps.uiComp as UIRenderer | null;
+
+            // Mask needs enter/exit pairing, render the whole item depth-first, it is skipped in the other layers
+            if (render && (render.stencilStage === Stage.ENTER_LEVEL || render.stencilStage === Stage.ENTER_LEVEL_INVERTED)) {
+                this.walk(item);
+                continue;
+            }
+
+            const selfOpacity = render && render.color ? render.color.a / 255 : 1;
+            const opacity = parentOpacity * selfOpacity * uiProps.localOpacity;
+            uiProps.setOpacity(opacity);
+
+            if (render && !approx(opacity, 0, EPSILON)) {
+                const opacityDirty = parentOpacityDirty > 0 || uiProps.colorDirty;
+                if (USE_SORTING_2D && sorting2DCount > 0) {
+                    this._recordUIRenderer(render, opacity, opacityDirty);
+                } else {
+                    this._handleUIRenderer(render, opacity, opacityDirty);
+                }
+            }
+        }
+
+        // Layer 1 ~ layersNum: the children of the items
+        for (let layer = 1; layer <= layersNum; ++layer) {
+            const isLastLayer = layer === layersNum;
+            for (let i = 0; i < items.length; ++i) {
+                const item = items[i];
+                if (!item.activeInHierarchy) {
+                    continue;
+                }
+                const uiProps = item._uiProps;
+                const render = uiProps.uiComp as UIRenderer | null;
+                if (render && (render.stencilStage === Stage.ENTER_LEVEL || render.stencilStage === Stage.ENTER_LEVEL_INVERTED)) {
+                    continue;
+                }
+
+                // The final opacity of the item has been stored in layer 0
+                const opacity = uiProps.opacity;
+                const visable = !approx(opacity, 0, EPSILON);
+                const children = item.children;
+                if (visable && layer <= children.length && !item._static) {
+                    this._pOpacity = opacity;
+                    this._opacityDirty = parentOpacityDirty + (uiProps.colorDirty ? 1 : 0);
+                    const end = isLastLayer ? children.length : layer;
+                    for (let c = layer - 1; c < end; ++c) {
+                        this.walk(children[c]);
+                    }
+                }
+
+                if (isLastLayer) {
+                    if (visable) {
+                        uiProps.colorDirty = false;
+                    }
+                    // Post render assembler update logic
+                    if (!USE_SORTING_2D && render && render.enabledInHierarchy) {
+                        render.postUpdateAssembler(this);
+                    }
+                }
+            }
+        }
+
+        this._pOpacity = parentOpacity;
+        this._opacityDirty = parentOpacityDirty;
+    }
+
     public walk (node: Node, level = 0): void {
         if (!node.activeInHierarchy) {
             return;
@@ -941,9 +1024,13 @@ export class Batcher2D implements IBatcher {
             }
 
             if (children.length > 0 && !node._static) {
-                for (let i = 0; i < children.length; ++i) {
-                    const child = children[i];
-                    this.walk(child, level);
+                if (uiProps.multiLayersNum > 0) {
+                    this._walkMultipleLayers(node, uiProps.multiLayersNum);
+                } else {
+                    for (let i = 0; i < children.length; ++i) {
+                        const child = children[i];
+                        this.walk(child, level);
+                    }
                 }
             }
 

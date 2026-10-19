@@ -29,5 +29,6 @@ export { LabelOutline } from './label-outline';
 export { UIStaticBatch } from './ui-static-batch';
 export { LabelShadow } from './label-shadow';
 export { UIOpacity } from './ui-opacity';
+export { UIMultiLayers } from './ui-multi-layers';
 
 export * from './deprecated';

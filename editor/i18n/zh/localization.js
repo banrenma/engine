@@ -326,6 +326,9 @@ module.exports = link(mixin({
     UIOpacity: {
         opacity: '设置物体的不透明度，取值范围为 0 ~ 255',
     },
+    UIMultiLayers: {
+        layersNum: '层数。该节点的直接子节点会按层渲染：第 0 层是子项自身，第 k 层是每个子项的第 k 个子节点，最后一层还包含剩余的所有子节点。仅在各子项互不重叠时使用',
+    },
     billboard: {
         texture: 'billboard 纹理',
         height: 'billboard 高度',

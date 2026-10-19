@@ -83,6 +83,7 @@ public:
 private:
     bool _isInit = false;
 
+    void walkMultipleLayers(Node* parent, float parentOpacity, bool parentColorDirty, uint8_t layersNum);
     void insertMaskBatch(RenderEntity* entity);
     void createClearModel();
 

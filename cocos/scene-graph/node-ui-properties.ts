@@ -102,6 +102,37 @@ export class NodeUIProperties {
     }
 
     public colorDirty = true;
+
+    /**
+     * @en If greater than 0, this node becomes a multi-layers parent and its direct children are the items
+     * (e.g. the items of a list). The items are rendered layer by layer instead of one item after another:
+     * layer 0 is the item itself, layer `k` (1 ~ `multiLayersNum`) is the `k`-th child (and its subtree) of every item,
+     * the last layer also contains all the remaining children of the item.
+     * So renderers of the same kind in different items (e.g. backgrounds, icons, labels) are submitted together and
+     * can be batched. Neither the items nor their children need any additional setting.
+     * Only use it when the items do not overlap each other.
+     * Items that enter a mask are still rendered depth-first. When 2D sorting is enabled, the order is decided by the priority.
+     * @zh 大于 0 时，该节点成为多层父节点，它的直接子节点是各个子项（例如列表的 item）。
+     * 子项不再一个接一个地渲染，而是按层渲染：第 0 层是子项自身，第 `k` 层（1 ~ `multiLayersNum`）是每个子项的
+     * 第 `k` 个子节点（及其子树），最后一层还包含该子项剩余的所有子节点。
+     * 这样不同子项中同类的渲染组件（如背景、图标、文字）会连续提交，从而可以合批。子项及其子节点都不需要额外设置。
+     * 仅在各子项互不重叠时使用。进入 Mask 的子项仍按深度优先渲染。开启 2D 排序时，顺序由 priority 决定。
+     */
+    get multiLayersNum (): number {
+        if (JSB) {
+            return (this._node as any)._getMultiLayersNum();
+        }
+        return this._multiLayersNum;
+    }
+    set multiLayersNum (val: number) {
+        // Stored as Uint8 in the shared memory with native
+        val = val > 0 ? Math.min(Math.floor(val), 255) : 0;
+        this._multiLayersNum = val;
+        if (JSB) {
+            (this._node as any)._setMultiLayersNum(val);
+        }
+    }
+    private _multiLayersNum = 0;
     protected _uiTransformComp: UITransform | null = null;
     /**
      * @engineInternal

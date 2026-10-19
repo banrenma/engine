@@ -607,6 +607,8 @@ public:
     inline float _getFinalOpacity() const { return _finalOpacity; } // NOLINT
     inline void _setFinalOpacity(float v) { _finalOpacity = v; } // NOLINT
     
+    inline uint8_t _getMultiLayersNum() const { return _multiLayersNum; } // NOLINT
+
     inline bool _isColorDirty() const { return _colorDirty == 0 ? false : true; } // NOLINT
     inline void _setColorDirty(bool v) { _colorDirty = v ? 1 : 0; } // NOLINT
 
@@ -711,7 +713,8 @@ private:
     uint8_t _colorDirty: 1;                                             // Uint8: 0:3
     uint8_t _boolBitPaddings: 4;                                        // Uint8: 0:4~7
     uint8_t _skewType{static_cast<uint8_t>(SkewType::NONE)};            // Uint8: 1
-    uint8_t _u8Paddings[2];                                             // Uint8: 2, 3
+    uint8_t _multiLayersNum{0};                                         // Uint8: 2
+    uint8_t _u8Padding{0};                                              // Uint8: 3
     float _skewX{.0F};                                                  // Float32: 0
     float _skewY{.0F};                                                  // Float32: 1
     float _localOpacity{1.F};                                           // Float32: 2

@@ -1538,6 +1538,14 @@ nodeProto._setFinalOpacity = function (v: number): void {
     this._sharedFloat32Arr[3] = v;
 }
 
+nodeProto._getMultiLayersNum = function (): number {
+    return this._sharedUint8Arr[2]; // Uint8, 2: multiLayersNum
+};
+
+nodeProto._setMultiLayersNum = function (v: number): void {
+    this._sharedUint8Arr[2] = v; // Uint8, 2: multiLayersNum
+};
+
 //
 nodeProto._ctor = function (name?: string) {
     this.__nativeRefs = {};
@@ -1555,7 +1563,7 @@ nodeProto._ctor = function (name?: string) {
     this._sharedUint32Arr = new Uint32Array(sharedArrayBuffer, 0, 3);
     // Int32Array with 1 element: siblingIndex
     this._sharedInt32Arr = new Int32Array(sharedArrayBuffer, 12, 1);
-    // Uint8Array with 4 elements: (activeInHierarchy, active, static, localOpacityDirty) uses 1 bytes for booleans, skewType, 2 bytes padding
+    // Uint8Array with 4 elements: (activeInHierarchy, active, static, colorDirty) uses 1 bytes for booleans, skewType, multiLayersNum, 1 byte padding
     this._sharedUint8Arr = new Uint8Array(sharedArrayBuffer, 16, 4);
     // Float32Array with 4 elements: skewX, skewY, localOpacity, finalOpacity
     this._sharedFloat32Arr = new Float32Array(sharedArrayBuffer, 20, 4);
