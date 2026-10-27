@@ -140,9 +140,127 @@ export enum Overflow {
      * 开启自动换行时，在最后一个可见行末尾截断；未开启自动换行时，每个超出宽度的行都会被截断。
      */
     ELLIPSIS = 4,
+    /**
+     * @en In CONSTRAINT mode, the label is laid out according to the {@link LabelConstraint}.
+     * The natural width and the original font size are used if the text content fits the max width and the max height.
+     * When the width is constrained, the label is laid out like {@link Overflow.RESIZE_HEIGHT} first (wrap at the
+     * constrained width and grow in height). If the wrapped content still exceeds the max height, it falls back to
+     * {@link Overflow.SHRINK} with the height bounded by the max height and the font size not below the min font size.
+     *
+     * @zh CONSTRAINT 模式中，文本按照 {@link LabelConstraint} 的约束排版。
+     * 文本内容没有超出最大宽度和最大高度时，使用文本的自然宽度与原始字号；
+     * 宽度不满足时先按 {@link Overflow.RESIZE_HEIGHT} 换行增高；若仍超出最大高度，再按 {@link Overflow.SHRINK}
+     * 缩小字号（不低于最小字号），必要时截断省略。
+     */
+    CONSTRAINT = 5,
 }
 
 ccenum(Overflow);
+
+/**
+ * @en
+ * The size constraint of a Label, it takes effect when the overflow mode is {@link Overflow.CONSTRAINT}.
+ * All the values are measured in the local space of the label node, `0` means the value is not limited.
+ *
+ * @zh
+ * 文本尺寸约束，仅在溢出模式为 {@link Overflow.CONSTRAINT} 时生效。
+ * 所有数值都以节点本地坐标为单位，`0` 表示不做限制。
+ */
+@ccclass('cc.LabelConstraint')
+export class LabelConstraint {
+    /** @internal */
+    public _onChanged: (() => void) | null = null;
+
+    @serializable
+    protected _minWidth = 0;
+
+    @serializable
+    protected _maxWidth = 0;
+
+    @serializable
+    protected _maxHeight = 0;
+
+    @serializable
+    protected _minFontSize = 0;
+
+    /**
+     * @en The minimum width of the label, the label is never narrower than this value.
+     * 0 means the width is not limited.
+     *
+     * @zh 最小宽度，文本宽度小于该值时节点宽度保持为该值。0 表示不限制宽度。
+     */
+    @editable
+    @rangeMin(0)
+    get minWidth (): number {
+        return this._minWidth;
+    }
+    set minWidth (value: number) {
+        if (this._minWidth === value) {
+            return;
+        }
+        this._minWidth = value;
+        this._onChanged?.();
+    }
+
+    /**
+     * @en The maximum width of the label, the text is wrapped when it is wider than this value.
+     * 0 means the width is not limited.
+     *
+     * @zh 最大宽度，文本宽度超过该值时换行。0 表示不限制宽度。
+     */
+    @editable
+    @rangeMin(0)
+    get maxWidth (): number {
+        return this._maxWidth;
+    }
+    set maxWidth (value: number) {
+        if (this._maxWidth === value) {
+            return;
+        }
+        this._maxWidth = value;
+        this._onChanged?.();
+    }
+
+    /**
+     * @en The maximum height of the label, the font size is shrunk when the text is taller than this value.
+     * 0 means the height is not limited.
+     *
+     * @zh 最大高度，文本高度超过该值时缩小字号。0 表示不限制高度。
+     */
+    @editable
+    @rangeMin(0)
+    get maxHeight (): number {
+        return this._maxHeight;
+    }
+    set maxHeight (value: number) {
+        if (this._maxHeight === value) {
+            return;
+        }
+        this._maxHeight = value;
+        this._onChanged?.();
+    }
+
+    /**
+     * @en The minimum font size, the font size is shrunk when the text goes out of the constraint box,
+     * but never below this value. The text which still goes out of the max height at this size is
+     * truncated with the ellipsis text. 0 means the font size is not limited and the text is never truncated.
+     *
+     * @zh 最小字号，文本超出约束范围时缩小字号，但不会小于该值。
+     * 缩小到该字号后仍然超出最大高度的文本会被截断并显示省略文本。0 表示不限制字号，也不会截断文本。
+     */
+    @editable
+    @rangeMin(0)
+    get minFontSize (): number {
+        return this._minFontSize;
+    }
+    set minFontSize (value: number) {
+        if (this._minFontSize === value) {
+            return;
+        }
+        this._minFontSize = value;
+        this._onChanged?.();
+    }
+}
 
 /**
  * @en Enum for cache mode.
@@ -205,6 +323,12 @@ export class Label extends UIRenderer {
      * @zh 文本溢出行为类型。
      */
     public static Overflow = Overflow;
+    /**
+     * @en The size constraint of the label, used in {@link Overflow.CONSTRAINT} mode.
+     *
+     * @zh 文本尺寸约束结构，用于 {@link Overflow.CONSTRAINT} 模式。
+     */
+    public static LabelConstraint = LabelConstraint;
     /**
      * @en Enum for cache mode.
      *
@@ -380,6 +504,10 @@ export class Label extends UIRenderer {
         }
 
         this._overflow = value;
+        if (value === Overflow.CONSTRAINT && !this._constraint) {
+            this._constraint = new LabelConstraint();
+        }
+        this._bindConstraint();
         this._markForUpdateRenderData();
     }
 
@@ -430,15 +558,38 @@ export class Label extends UIRenderer {
     }
 
     /**
+     * @en The size constraint of the label, only takes effect in {@link Overflow.CONSTRAINT} mode.
+     * It is `null` by default, which means the text is not constrained.
+     *
+     * @zh 文本尺寸约束，仅在 {@link Overflow.CONSTRAINT} 模式下生效。
+     * 默认为 `null`，表示不做任何约束。
+     */
+    @type(LabelConstraint)
+    @displayOrder(11.2)
+    @visible(function isConstraintOverflow (this: Label) { return this._overflow === Overflow.CONSTRAINT; })
+    get constraint (): LabelConstraint | null {
+        return this._constraint;
+    }
+    set constraint (value: LabelConstraint | null) {
+        if (this._constraint === value) {
+            return;
+        }
+
+        this._constraint = value ?? null;
+        this._bindConstraint();
+        this._markForUpdateRenderData();
+    }
+
+    /**
      * @en
      * The text which is appended to the end of the truncated line. It is `undefined` by default,
      * which means "..." is used. It is not exposed in the editor, set it manually in scripts if needed.
-     * Takes effect in ELLIPSIS mode, and in SHRINK mode when minFontSize is greater than 0.
+     * Takes effect in ELLIPSIS mode, and in SHRINK or CONSTRAINT mode when minFontSize is greater than 0.
      *
      * @zh
      * 文本被截断时追加在行末尾的省略文本。默认为 `undefined`，表示使用 "..."。
      * 不会在编辑器中显示，有需要时请在脚本中手动设置。
-     * 在 ELLIPSIS 模式下生效，以及在 SHRINK 模式下 minFontSize 大于 0 时生效。
+     * 在 ELLIPSIS 模式下生效，以及在 SHRINK 或 CONSTRAINT 模式下最小字号大于 0 时生效。
      */
     get ellipsisText (): string | undefined {
         return this._ellipsisText;
@@ -458,12 +609,12 @@ export class Label extends UIRenderer {
     /**
      * @en
      * Whether the content is truncated and the ellipsis text is displayed. Read only.
-     * It is only possible to be `true` in ELLIPSIS mode, or in SHRINK mode when minFontSize is greater than 0.
+     * It is only possible to be `true` in ELLIPSIS mode, or in SHRINK or CONSTRAINT mode when minFontSize is greater than 0.
      * The render data will be updated first if it is dirty.
      *
      * @zh
      * 文本内容是否被截断并显示了省略文本，只读。
-     * 仅在 ELLIPSIS 模式，或 minFontSize 大于 0 的 SHRINK 模式下才可能为 `true`。
+     * 仅在 ELLIPSIS 模式，或最小字号大于 0 的 SHRINK、CONSTRAINT 模式下才可能为 `true`。
      * 如果渲染数据已过期，会先更新渲染数据。
      */
     get isEllipsized (): boolean {
@@ -891,6 +1042,8 @@ export class Label extends UIRenderer {
     protected _enableWrapText = true;
     @serializable
     protected _minFontSize = 0;
+    @serializable
+    protected _constraint: LabelConstraint | null = null;
     // don't need serialize, not exposed in the editor, `undefined` means using the default ellipsis text
     protected _ellipsisText: string | undefined = undefined;
     @serializable
@@ -980,7 +1133,19 @@ export class Label extends UIRenderer {
             this.fontFamily = 'Arial';
         }
 
+        this._bindConstraint();
         this._applyFontTexture();
+    }
+
+    private _bindConstraint (): void {
+        if (!this._constraint) {
+            return;
+        }
+        this._constraint._onChanged = (): void => {
+            if (this._overflow === Overflow.CONSTRAINT) {
+                this._markForUpdateRenderData();
+            }
+        };
     }
 
     private destroyTtfSpriteFrame (): void {

@@ -64,8 +64,13 @@ export class BmfontUtils {
         const overflow = comp.overflow;
         layout.overFlow = overflow;
         layout.lineHeight = comp.lineHeight;
-        layout.minFontSize = comp.minFontSize;
         layout.ellipsisText = comp.ellipsisText ?? DEFAULT_ELLIPSIS_TEXT;
+        const constraint = comp.constraint;
+        layout.constraintMinWidth = constraint ? constraint.minWidth : 0;
+        layout.constraintMaxWidth = constraint ? constraint.maxWidth : 0;
+        layout.constraintMaxHeight = constraint ? constraint.maxHeight : 0;
+        // CONSTRAINT mode uses the min font size of the constraint structure
+        layout.minFontSize = (overflow === Overflow.CONSTRAINT && constraint) ? constraint.minFontSize : comp.minFontSize;
 
         const nodeContentSize = outputLayoutData.nodeContentSize;
         nodeContentSize.width = trans.width;
@@ -79,6 +84,8 @@ export class BmfontUtils {
         } else if (overflow === Overflow.RESIZE_HEIGHT) {
             layout.wrapping = true;
             nodeContentSize.height += shareLabelInfo.margin * 2;
+        } else if (overflow === Overflow.CONSTRAINT) {
+            layout.wrapping = true;
         } else {
             layout.wrapping = comp.enableWrapText;
         }

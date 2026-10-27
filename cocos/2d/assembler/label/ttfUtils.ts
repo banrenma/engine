@@ -54,16 +54,20 @@ export class TTFUtils {
         // layout info
         layout.lineHeight = comp.lineHeight; // both
         layout.overFlow = comp.overflow; // layout only // but change render
-        layout.minFontSize = comp.minFontSize;
         layout.ellipsisText = comp.ellipsisText ?? DEFAULT_ELLIPSIS_TEXT;
+        const constraint = comp.constraint;
+        layout.constraintMinWidth = constraint ? constraint.minWidth : 0;
+        layout.constraintMaxWidth = constraint ? constraint.maxWidth : 0;
+        layout.constraintMaxHeight = constraint ? constraint.maxHeight : 0;
+        // CONSTRAINT mode uses the min font size of the constraint structure
+        layout.minFontSize = (comp.overflow === Overflow.CONSTRAINT && constraint) ? constraint.minFontSize : comp.minFontSize;
         if (comp.overflow === Overflow.NONE) {
             layout.wrapping = false;
-        } else if (comp.overflow === Overflow.RESIZE_HEIGHT) {
+        } else if (comp.overflow === Overflow.RESIZE_HEIGHT || comp.overflow === Overflow.CONSTRAINT) {
             layout.wrapping = true;
         } else {
             layout.wrapping = comp.enableWrapText; // layout only // but change render
         }
-
         // effect info // both
         style.isBold = comp.isBold;
         style.isItalic = comp.isItalic;

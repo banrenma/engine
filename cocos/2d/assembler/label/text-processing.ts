@@ -136,7 +136,8 @@ export class TextProcessing {
             this._alignText(style, layout, outputLayoutData, inputString);
             // SHRINK mode with a minimum font size falls back to ellipsis when the font can not be shrunk any more
             if (layout.overFlow === Overflow.ELLIPSIS as number
-                || (layout.overFlow === Overflow.SHRINK as number && layout.minFontSize > 0)) {
+                || ((layout.overFlow === Overflow.SHRINK as number || layout.overFlow === Overflow.CONSTRAINT as number)
+                    && layout.minFontSize > 0)) {
                 const ellipsisString = this._getBMFontEllipsisString(style, layout, outputLayoutData, inputString);
                 if (ellipsisString !== inputString) {
                     // layout again with the truncated string, keep the font size unchanged
@@ -282,9 +283,89 @@ export class TextProcessing {
             nodeContentSize.height = (rawHeight + contentSizeExtend.height * fontScale) / fontScale;
             break;
         }
+        case Overflow.CONSTRAINT: {
+            this._calculateConstraintFont(paragraphedStrings, style, layout, outputLayoutData);
+            break;
+        }
         default: {
             // nop
         }
+        }
+    }
+
+    /**
+     * Layout the text in CONSTRAINT mode:
+     * the natural width and the origin font size are used when the text fits the constraint box.
+     * When the width is constrained, layout follows RESIZE_HEIGHT first; if the wrapped height still
+     * exceeds the max height, SHRINK is applied with the node height set to the max height.
+     */
+    private _calculateConstraintFont (
+        paragraphedStrings: string[],
+        style: TextStyle,
+        layout: TextLayout,
+        outputLayoutData: TextOutputLayoutData,
+    ): void {
+        const context = this._context;
+        if (!context) return;
+
+        const { canvasSize, nodeContentSize, canvasPadding, contentSizeExtend } = outputLayoutData;
+        const fontScale = this._fontScale;
+        const fontDesc = this._getFontDesc(style.actualFontSize, style.fontFamily, style.isBold, style.isItalic);
+        context.font = fontDesc;
+
+        // 1. measure the natural size of the text with the origin font size
+        let naturalWidth = 0;
+        for (let i = 0; i < paragraphedStrings.length; ++i) {
+            naturalWidth = Math.max(naturalWidth, safeMeasureText(context, paragraphedStrings[i], fontDesc));
+        }
+        const naturalHeight = (paragraphedStrings.length + BASELINE_RATIO)
+            * this._getLineHeight(layout.lineHeight, style.actualFontSize, style.fontSize);
+
+        // 2. the content width is the natural width, limited by the min width and the max width
+        const minWidth = layout.constraintMinWidth * fontScale;
+        const maxWidth = layout.constraintMaxWidth * fontScale;
+        const maxHeight = layout.constraintMaxHeight * fontScale;
+        let contentWidth = Math.max(naturalWidth, minWidth);
+        if (maxWidth > 0) {
+            contentWidth = Math.min(contentWidth, Math.max(maxWidth, minWidth));
+        }
+
+        // 3. the text fits the constraint box, keep the origin font size and the natural size
+        if (naturalWidth <= contentWidth + 1e-3 && (maxHeight <= 0 || naturalHeight <= maxHeight + 1e-3)) {
+            style.fontDesc = fontDesc;
+            nodeContentSize.width = (contentWidth + contentSizeExtend.width * fontScale) / fontScale;
+            nodeContentSize.height = (naturalHeight + contentSizeExtend.height * fontScale) / fontScale;
+            canvasSize.width = contentWidth + canvasPadding.width * fontScale;
+            canvasSize.height = naturalHeight + canvasPadding.height * fontScale;
+            return;
+        }
+
+        // 4. width constrained: RESIZE_HEIGHT first (wrap at content width, original font size)
+        style.fontDesc = fontDesc;
+        nodeContentSize.width = contentWidth / fontScale;
+        canvasSize.width = contentWidth;
+        this._calculateWrapText(paragraphedStrings, style, layout, outputLayoutData);
+
+        let rawHeight = (outputLayoutData.parsedString.length + BASELINE_RATIO)
+            * this._getLineHeight(layout.lineHeight, style.actualFontSize, style.fontSize);
+        const hasHeightLimit = maxHeight > 0;
+        if (!hasHeightLimit || rawHeight <= maxHeight + 1e-3) {
+            canvasSize.height = rawHeight + canvasPadding.height * fontScale;
+            nodeContentSize.height = (rawHeight + contentSizeExtend.height * fontScale) / fontScale;
+            return;
+        }
+
+        // 5. wrapped height still exceeds max height: SHRINK to fit max height
+        nodeContentSize.height = maxHeight / fontScale;
+        canvasSize.height = maxHeight;
+        this._calculateShrinkFont(paragraphedStrings, style, layout, outputLayoutData);
+        this._calculateWrapText(paragraphedStrings, style, layout, outputLayoutData);
+        rawHeight = (outputLayoutData.parsedString.length + BASELINE_RATIO)
+            * this._getLineHeight(layout.lineHeight, style.actualFontSize, style.fontSize);
+        canvasSize.height = maxHeight;
+        nodeContentSize.height = maxHeight / fontScale;
+        if (layout.minFontSize > 0 && rawHeight > maxHeight + 1e-3) {
+            this._calculateEllipsisText(style, layout, outputLayoutData);
         }
     }
 
@@ -871,6 +952,10 @@ export class TextProcessing {
     }
 
     private _alignText (style: TextStyle, layout: TextLayout, outputLayoutData: TextOutputLayoutData, inputString: string): void {
+        if (layout.overFlow === Overflow.CONSTRAINT as number) {
+            this._alignConstraintText(style, layout, outputLayoutData, inputString);
+            return;
+        }
         this._multilineTextWrap(style, layout, outputLayoutData, inputString, this._getFirstWordLen);
 
         // shrink
@@ -882,6 +967,78 @@ export class TextProcessing {
                 this._shrinkLabelToContentSize(style, layout, outputLayoutData, inputString, this._isHorizontalClamp);
             }
         }
+        this._parsedString(outputLayoutData, inputString);
+    }
+
+    /**
+     * Layout the text in CONSTRAINT mode:
+     * the natural width and the origin font size are used when the text fits the constraint box.
+     * When the width is constrained, layout follows RESIZE_HEIGHT first; if the wrapped height still
+     * exceeds the max height, SHRINK is applied.
+     */
+    private _alignConstraintText (
+        style: TextStyle,
+        layout: TextLayout,
+        outputLayoutData: TextOutputLayoutData,
+        inputString: string,
+    ): void {
+        const { nodeContentSize } = outputLayoutData;
+
+        // 1. measure the natural size of the text with the origin font size, without wrapping
+        layout.textWidthTemp = 0;
+        layout.textHeightTemp = 0;
+        layout.textDimensions.width = 0;
+        layout.textDimensions.height = 0;
+        layout.maxLineWidth = 0;
+        this._computeHorizontalKerningForText(style, layout, inputString);
+        this._multilineTextWrap(style, layout, outputLayoutData, inputString, this._getFirstWordLen);
+        const naturalWidth = nodeContentSize.width;
+        const naturalHeight = nodeContentSize.height;
+
+        // 2. the width is the natural width, limited by the min width and the max width
+        const minWidth = layout.constraintMinWidth;
+        const maxWidth = layout.constraintMaxWidth;
+        let contentWidth = Math.max(naturalWidth, minWidth);
+        if (maxWidth > 0) {
+            contentWidth = Math.min(contentWidth, Math.max(maxWidth, minWidth));
+        }
+        layout.textWidthTemp = contentWidth;
+        layout.textDimensions.width = contentWidth;
+        layout.maxLineWidth = contentWidth;
+
+        // 3. the text fits the constraint box, keep the origin font size and the natural size
+        const maxHeight = layout.constraintMaxHeight;
+        if (naturalWidth <= contentWidth + 1e-3 && (maxHeight <= 0 || naturalHeight <= maxHeight + 1e-3)) {
+            layout.textHeightTemp = 0;
+            layout.textDimensions.height = 0;
+            this._multilineTextWrap(style, layout, outputLayoutData, inputString, this._getFirstWordLen);
+            nodeContentSize.width = contentWidth;
+            this._parsedString(outputLayoutData, inputString);
+            return;
+        }
+
+        // 4. width constrained: RESIZE_HEIGHT first (wrap at content width, auto height)
+        layout.textHeightTemp = 0;
+        layout.textDimensions.height = 0;
+        this._multilineTextWrap(style, layout, outputLayoutData, inputString, this._getFirstWordLen);
+        const resizeHeight = nodeContentSize.height;
+        if (maxHeight <= 0 || resizeHeight <= maxHeight + 1e-3) {
+            nodeContentSize.width = contentWidth;
+            this._parsedString(outputLayoutData, inputString);
+            return;
+        }
+
+        // 5. wrapped height still exceeds max height: SHRINK to fit max height
+        layout.textHeightTemp = maxHeight;
+        layout.textDimensions.height = maxHeight;
+        this._multilineTextWrap(style, layout, outputLayoutData, inputString, this._getFirstWordLen);
+        if (style.fontSize > 0 && this._isVerticalClamp(style, layout, outputLayoutData, inputString, this)) {
+            this._shrinkLabelToContentSize(style, layout, outputLayoutData, inputString, this._isVerticalClamp);
+        }
+        if (style.fontSize > 0 && this._isHorizontalNeedShrink(layout, outputLayoutData)) {
+            this._shrinkLabelToContentSize(style, layout, outputLayoutData, inputString, this._isHorizontalClamp);
+        }
+        nodeContentSize.width = contentWidth;
         this._parsedString(outputLayoutData, inputString);
     }
 
@@ -1221,7 +1378,8 @@ export class TextProcessing {
     }
 
     private _getFontScale (style: TextStyle, layout: TextLayout): number {
-        return layout.overFlow === (Overflow.SHRINK as number) ? style.bmfontScale : 1;
+        return (layout.overFlow === (Overflow.SHRINK as number) || layout.overFlow === (Overflow.CONSTRAINT as number))
+            ? style.bmfontScale : 1;
     }
 
     private _isVerticalClamp (

@@ -54,12 +54,18 @@ module.exports = {
                             '1. CLAMP: Text nodes outside the bounding box will be truncated. <br> ' +
                             '2. SHRINK: Automatically shrink text box according to the constraint node. <br> ' +
                             '3. RESIZE: Automatically updates the Node based on height of the text. <br> ' +
-                            '4. ELLIPSIS: Text outside the bounding box will be truncated and the ellipsis text is shown at the end.',
+                            '4. ELLIPSIS: Text outside the bounding box will be truncated and the ellipsis text is shown at the end. <br> ' +
+                            '5. CONSTRAINT: Layout the text according to the constraint. The natural width and the origin font size '
+                            + 'are used when the text fits the constraint, otherwise the font size is shrunk and the height is bounded by the max height.',
                     },
                     'minFontSize': {
                         displayName: 'Min Font Size',
                         tooltip: 'The minimum font size in SHRINK mode. Text which still goes out of the bounding box at this size '
                             + 'is truncated with the ellipsis text. 0 means no limitation.',
+                    },
+                    'constraint': {
+                        displayName: 'Constraint',
+                        tooltip: 'The size constraint used in CONSTRAINT mode.',
                     },
                     'enableWrapText': {
                         displayName: 'Auto Newline',
@@ -129,6 +135,27 @@ module.exports = {
                     'shadowBlur': {
                         displayName: 'Shadow Blur',
                         tooltip: 'A non-negative float specifying the level of shadow blur.',
+                    },
+                },
+            },
+            'LabelConstraint': {
+                properties: {
+                    'minWidth': {
+                        displayName: 'Min Width',
+                        tooltip: 'The label is never narrower than this value. 0 means no limitation.',
+                    },
+                    'maxWidth': {
+                        displayName: 'Max Width',
+                        tooltip: 'The text is wrapped when it is wider than this value. 0 means no limitation.',
+                    },
+                    'maxHeight': {
+                        displayName: 'Max Height',
+                        tooltip: 'The font size is shrunk when the text is taller than this value. 0 means no limitation.',
+                    },
+                    'minFontSize': {
+                        displayName: 'Min Font Size',
+                        tooltip: 'The font size is not shrunk below this value. The text which still goes out of the max height '
+                            + 'is truncated with the ellipsis text. 0 means no limitation.',
                     },
                 },
             },

@@ -41,6 +41,11 @@ export class TextLayout {
     public minFontSize = 0; // both, SHRINK mode only, 0 means no limitation
     public ellipsisText = DEFAULT_ELLIPSIS_TEXT; // both, text appended to the truncated line
 
+    // constraint, CONSTRAINT mode only, 0 means no limitation
+    public constraintMinWidth = 0; // both
+    public constraintMaxWidth = 0; // both
+    public constraintMaxHeight = 0; // both
+
     // bmfont extra part
     public maxLineWidth = 0; // bmfont
     public spacingX = 0; // bmfont
@@ -70,6 +75,9 @@ export class TextLayout {
         this.lineHeight = 10;
         this.minFontSize = 0;
         this.ellipsisText = DEFAULT_ELLIPSIS_TEXT;
+        this.constraintMinWidth = 0;
+        this.constraintMaxWidth = 0;
+        this.constraintMaxHeight = 0;
         this.maxLineWidth = 0;
         this.spacingX = 0;
         this.textWidthTemp = 0;
